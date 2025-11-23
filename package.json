@@ -1,0 +1,13 @@
+{
+  "name": "aldos-cloudprnt-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "latest",
+    "body-parser": "latest",
+    "cors": "latest"
+  }
+}
