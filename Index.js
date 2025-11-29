@@ -1,67 +1,92 @@
+// index.js – Aldo's CloudPRNT backend
+
 const express = require("express");
-const bodyParser = require("body-parser");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
+const PORT = process.env.PORT || 3000;
 
+// Middlewares
+app.use(cors());
+app.use(express.json()); // parse JSON body
+
+// Here we store the last ticket text sent by the kiosk
 let lastOrder = null;
 
-// ✔ CloudPRNT ENDPOINT — The printer asks your server for the latest job
+// ================= CLOUDPRNT ENDPOINT =================
+// The printer calls this URL to ask if there is a job ready.
+// Configure the printer CloudPRNT URL as:
+//   https://aldos-printcore-server-1.onrender.com/cloudprnt
 app.get("/cloudprnt", (req, res) => {
   if (!lastOrder) {
-    return res.json({
-      jobReady: false
-    });
+    // No job waiting
+    return res.json({ jobReady: false });
   }
 
+  // ESC/POS control bytes
   const ESC = "\x1B";
-  const GS = "\x1D";
+  const GS  = "\x1D";
 
+  // Build ESC/POS ticket text
   const escpos =
     ESC + "@"
     + ESC + "!" + "\x38"
     + "ALDO'S PIZZERIA\n"
     + ESC + "!" + "\x00"
-    + "--------------------------\n"
-    + lastOrder
-    + "\n--------------------------\n"
+    + "-----------------------------\n"
+    + lastOrder + "\n"
+    + "-----------------------------\n"
     + "Thank you!\n"
     + ESC + "d" + "\x03"
     + GS + "V" + "\x00";
 
+  // Clear memory after giving the job to the printer
   lastOrder = null;
 
+  // Send job to printer in CloudPRNT format
   res.json({
     jobReady: true,
     job: {
       type: "escpos",
-      data: Buffer.from(escpos).toString("base64")
+      data: Buffer.from(escpos, "binary").toString("base64")
     }
   });
 });
 
-// ✔ Endpoint where your APP sends the ticket text
+// ================= KIOSK SUBMIT ENDPOINT =================
+// This is the URL your kiosk app.js is calling:
+//   POST https://aldos-printcore-server-1.onrender.com/submit
 app.post("/submit", (req, res) => {
-  const { ticket } = req.body;
+  const { ticket, deviceId } = req.body || {};
 
   if (!ticket) {
-    return res.status(400).json({ error: "Missing ticket text" });
+    console.error("POST /submit – missing ticket text. Body:", req.body);
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing ticket text" });
   }
 
+  // Save ticket in memory so the printer can fetch it
   lastOrder = ticket;
 
-  console.log("Ticket received:");
-  console.log(ticket);
+  console.log("✅ Ticket received from kiosk.");
+  if (deviceId) {
+    console.log("Device ID:", deviceId);
+  }
+  console.log("Ticket content:\n", ticket);
 
-  res.json({ success: true, message: "Ticket stored, printer will fetch it." });
+  res.json({
+    success: true,
+    message: "Ticket stored, printer will fetch it."
+  });
 });
 
-// ✔ Welcome message
+// ================= HEALTH / ROOT =================
 app.get("/", (req, res) => {
-  res.send("Aldo's CloudPRNT server is running!");
+  res.send("✅ Aldo's CloudPRNT server is running.");
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+// ================= START SERVER =================
+app.listen(PORT, () => {
+  console.log(`🚀 Aldo's CloudPRNT server listening on port ${PORT}`);
+});
