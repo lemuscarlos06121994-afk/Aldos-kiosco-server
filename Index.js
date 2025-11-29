@@ -1,4 +1,4 @@
-// Simple CloudPRNT server for Aldo's kiosk
+// index.js  — Aldo's CloudPRNT server
 
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -10,92 +10,86 @@ const PORT = process.env.PORT || 3000;
 // Middlewares
 app.use(cors());
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-// Here we store the last ticket text sent by the kiosk
+// Aquí guardamos el último ticket que mandó el kiosco
 let lastTicket = null;
 
-// =============== HOME (FOR TESTING IN BROWSER) ===============
-app.get("/", (req, res) => {
-  res.send("✅ Aldo's CloudPRNT kiosk server is running.");
-});
-
-// =============== CLOUDPRNT STATUS ENDPOINT ===================
-// Star printer calls this to know if there is a job waiting
-app.get("/cloudprnt/status", (req, res) => {
-  res.json({
-    jobReady: !!lastTicket,
-    message: lastTicket
-      ? "Ticket waiting for printer."
-      : "Server online, no jobs in queue."
-  });
-});
-
-// =============== CLOUDPRNT JOB ENDPOINT ======================
-// Star printer calls this to fetch the actual job
-app.get("/cloudprnt/job", (req, res) => {
+/**
+ * 1) ENDPOINT PARA LA IMPRESORA: /cloudprnt
+ * La impresora llama aquí para preguntar si hay un trabajo nuevo.
+ */
+app.get("/cloudprnt", (req, res) => {
   if (!lastTicket) {
+    // No hay nada que imprimir todavía
     return res.json({ jobReady: false });
   }
 
-  // ESC/POS control codes
+  // Comandos ESC/POS básicos
   const ESC = "\x1B";
-  const GS  = "\x1D";
+  const GS = "\x1D";
 
-  // Build ESC/POS ticket with header + body (lastTicket) + footer
   const escpos =
     ESC + "@"
-    + ESC + "!" + "\x38"          // double-size text for the title
-    + "ALDO'S PIZZERIA\n"
+    + ESC + "!" + "\x38"           // Texto grande para el título
+    + "* ALDO'S PIZZERIA\n"
+    + ESC + "!" + "\x00"           // Volver a tamaño normal
     + "------------------------------\n"
     + lastTicket + "\n"
     + "------------------------------\n"
     + "Thank you!\n"
-    + ESC + "d" + "\x03"          // feed some lines
-    + GS + "V" + "\x00";          // full cut
+    + ESC + "d" + "\x03"           // Alimentar papel
+    + GS + "V" + "\x00";           // Corte parcial
 
-  // After building the job, clear the stored ticket
+  // Limpiamos el ticket después de entregarlo
   lastTicket = null;
 
-  console.log("📨 Sending ESC/POS job to printer.");
-
-  res.json({
+  return res.json({
     jobReady: true,
     job: {
       type: "escpos",
-      data: Buffer.from(escpos, "utf8").toString("base64")
+      data: Buffer.from(escpos).toString("base64")
     }
   });
 });
 
-// =============== KIOSK SUBMIT ENDPOINT =======================
-// Your kiosk (GitHub Pages app) calls this URL with POST /submit
-// body: { ticket: "ticket text here..." }
+/**
+ * 2) ENDPOINT PARA EL KIOSCO: /submit
+ * Tu app de GitHub Pages manda aquí el texto del ticket.
+ */
 app.post("/submit", (req, res) => {
-  const { ticket } = req.body;
+  // Aceptamos dos formatos por si acaso:
+  // { ticket: "..." }  (nuevo)
+  // { content: "..." } (viejo)
+  const { ticket, content, deviceId } = req.body || {};
+  const txt = ticket || content;
 
-  if (!ticket || typeof ticket !== "string") {
-    console.log("❌ Invalid /submit payload:", req.body);
+  if (!txt) {
+    console.error("❌ /submit sin ticket:", req.body);
     return res.status(400).json({ error: "Missing ticket text" });
   }
 
-  lastTicket = ticket;
+  lastTicket = txt;
 
-  console.log("🧾 New ticket received from kiosk:");
-  console.log(ticket);
+  console.log("✅ New ticket received from kiosk.");
+  if (deviceId) console.log("Device ID:", deviceId);
+  console.log("Ticket text:\n", txt);
 
-  res.json({
-    success: true,
-    message: "Ticket stored, printer will fetch it."
+  return res.json({
+    ok: true,
+    message: "Ticket stored. Printer will fetch it."
   });
 });
 
-// =============== 404 HANDLER (OPTIONAL) ======================
-app.use((req, res) => {
-  res.status(404).json({ error: "Not found" });
+/**
+ * 3) ENDPOINT DE SALUD / PRUEBA
+ */
+app.get("/", (req, res) => {
+  res.send("✅ Aldo's CloudPRNT server is running.");
 });
 
-// =============== START SERVER ================================
+// Arrancar servidor
 app.listen(PORT, () => {
-  console.log(`🚀 Aldo's CloudPRNT kiosk server listening on port ${PORT}`);
+  console.log(`🚀 Aldo's CloudPRNT server listening on port ${PORT}`);
 });
+
+module.exports = app;
